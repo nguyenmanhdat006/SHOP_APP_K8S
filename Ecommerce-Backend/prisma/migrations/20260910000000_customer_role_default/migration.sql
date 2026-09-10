@@ -1,0 +1,6 @@
+UPDATE "users"
+SET "role" = 'CUSTOMER'
+WHERE "role" IS NULL OR "role" = 'USER';
+
+ALTER TABLE "users"
+ALTER COLUMN "role" SET DEFAULT 'CUSTOMER';

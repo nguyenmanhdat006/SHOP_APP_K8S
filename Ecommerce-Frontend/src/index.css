@@ -1,0 +1,28 @@
+:root {
+    font-family: "DM Sans", "Helvetica Neue", sans-serif;
+    color: #17221f;
+    background: #f5f4ef;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    background: #f5f4ef;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    background: #f5f4ef;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
