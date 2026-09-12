@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { authTokenInvalidTotal } from "../config/metrics.js";
 
 export const ROLES = Object.freeze({
   CUSTOMER: "CUSTOMER",
@@ -17,6 +18,7 @@ export const requireAuth = (req, res, next) => {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
+    authTokenInvalidTotal.inc({ reason: "token_malformed" });
     return res.status(401).json({ message: "Unauthorized" });
   }
 
@@ -31,7 +33,9 @@ export const requireAuth = (req, res, next) => {
       role: normalizeRole(payload.role),
     };
     next();
-  } catch {
+  } catch (error) {
+    const reason = error.name === "TokenExpiredError" ? "token_expired" : "token_malformed";
+    authTokenInvalidTotal.inc({ reason });
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };

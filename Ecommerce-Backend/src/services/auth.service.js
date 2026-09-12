@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { prismaWrite } from "../config/prisma.js";
 import { normalizeRole, ROLES } from "../middlewares/auth.middleware.js";
 import { UserEntity } from "../entities/index.js";
+import { loginFailedTotal } from "../config/metrics.js";
 
 const sanitizeUser = (user) => {
   const entity = new UserEntity({ ...user, role: normalizeRole(user.role) });
@@ -82,11 +83,13 @@ export const loginUser = async ({ email, password }) => {
   const user = userRows[0];
 
   if (!user) {
+    loginFailedTotal.inc({ reason: "user_not_found" });
     throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
   }
 
   const passwordMatch = await bcrypt.compare(password, user.password);
   if (!passwordMatch) {
+    loginFailedTotal.inc({ reason: "wrong_password" });
     throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
   }
 

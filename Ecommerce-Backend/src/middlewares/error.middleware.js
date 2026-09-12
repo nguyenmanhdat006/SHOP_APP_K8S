@@ -8,7 +8,7 @@ export const errorHandler = (error, req, res, next) => {
   }
 
   if (!error.statusCode || error.statusCode >= 500) {
-    console.error(error);
+    console.error({ requestId: req.requestId, error });
   }
   res.status(error.statusCode || 500).json({
     message: error.message || "Internal server error",
