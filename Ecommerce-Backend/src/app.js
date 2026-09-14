@@ -12,6 +12,8 @@ import prisma from "./config/prisma.js";
 
 const app = express();
 
+app.set("trust proxy", true);
+
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || true,

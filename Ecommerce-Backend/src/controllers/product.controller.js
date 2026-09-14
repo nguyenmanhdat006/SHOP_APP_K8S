@@ -8,12 +8,25 @@ import {
   searchProducts as searchProductsService,
   updateProduct as updateProductService,
 } from "../services/product.service.js";
+import { auditContext, logAudit } from "../services/audit.service.js";
+
+const auditFailure = async (req, action, error, targetId = null) => {
+  await logAudit({
+    ...auditContext(req),
+    action,
+    targetType: targetId ? "product" : null,
+    targetId,
+    result: "failure",
+    detail: { reason: error.auditReason || "operation_failed" },
+  });
+};
 
 export const getAllProducts = async (req, res, next) => {
   try {
     const products = await listProducts();
     res.json(products);
   } catch (error) {
+    await auditFailure(req, "product.create", error);
     next(error);
   }
 };
@@ -23,6 +36,7 @@ export const searchProducts = async (req, res, next) => {
     const products = await searchProductsService(req.query.keyword);
     res.json(products);
   } catch (error) {
+    await auditFailure(req, "product.update", error, req.params.id);
     next(error);
   }
 };
@@ -80,10 +94,11 @@ export const updateProduct = async (req, res, next) => {
 
 export const deleteProduct = async (req, res, next) => {
   try {
-    await deleteProductService(Number(req.params.id));
+    await deleteProductService(Number(req.params.id), req);
 
     res.status(204).send();
   } catch (error) {
+    await auditFailure(req, "product.delete", error, req.params.id);
     next(error);
   }
 };
@@ -93,9 +108,11 @@ export const purchaseProduct = async (req, res, next) => {
     const product = await purchaseProductService(
       Number(req.params.id),
       req.body.quantity,
+      req,
     );
     res.json(product);
   } catch (error) {
+    await auditFailure(req, "product.direct_purchase", error, req.params.id);
     next(error);
   }
 };

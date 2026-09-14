@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { authTokenInvalidTotal } from "../config/metrics.js";
+import { auditContext, logAudit } from "../services/audit.service.js";
 
 export const ROLES = Object.freeze({
   CUSTOMER: "CUSTOMER",
@@ -13,12 +14,18 @@ export const normalizeRole = (role) => {
   return ROLES.CUSTOMER;
 };
 
-export const requireAuth = (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
     authTokenInvalidTotal.inc({ reason: "token_malformed" });
+    await logAudit({
+      ...auditContext(req),
+      action: "security.invalid_token",
+      result: "failure",
+      detail: { reason: "token_malformed" },
+    });
     return res.status(401).json({ message: "Unauthorized" });
   }
 
@@ -36,12 +43,24 @@ export const requireAuth = (req, res, next) => {
   } catch (error) {
     const reason = error.name === "TokenExpiredError" ? "token_expired" : "token_malformed";
     authTokenInvalidTotal.inc({ reason });
+    await logAudit({
+      ...auditContext(req),
+      action: "security.invalid_token",
+      result: "failure",
+      detail: { reason },
+    });
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };
 
-export const requireRole = (...allowedRoles) => (req, res, next) => {
+export const requireRole = (...allowedRoles) => async (req, res, next) => {
   if (!req.user || !allowedRoles.includes(normalizeRole(req.user.role))) {
+    await logAudit({
+      ...auditContext(req),
+      action: "security.access_denied",
+      result: "failure",
+      detail: { requiredRoles: allowedRoles },
+    });
     return res.status(403).json({ message: "You do not have permission for this action" });
   }
 

@@ -102,3 +102,21 @@ model order_items {
   product    products @relation(fields: [product_id], references: [id], onDelete: Restrict)
   @@index([product_id])
 }
+
+model audit_events {
+  id          Int      @id @default(autoincrement())
+  occurred_at DateTime @default(now()) @db.Timestamp(6)
+  request_id  String?  @db.VarChar(64)
+  actor_id    Int?
+  actor_role  String?  @db.VarChar(50)
+  action      String   @db.VarChar(64)
+  target_type String?  @db.VarChar(32)
+  target_id   String?  @db.VarChar(64)
+  result      String   @default("success") @db.VarChar(16)
+  client_ip   String?  @db.VarChar(45)
+  detail      Json?
+
+  @@index([occurred_at(sort: Desc)])
+  @@index([actor_id, occurred_at(sort: Desc)])
+  @@index([request_id])
+}

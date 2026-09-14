@@ -1,8 +1,9 @@
 import prisma from "../config/prisma.js";
 import { clearCart } from "./cart.service.js";
+import { auditContext, logAudit } from "./audit.service.js";
 
-export const createOrderFromCart = async (userId, shipping = {}) => {
-  return prisma.$transaction(async (transaction) => {
+export const createOrderFromCart = async (userId, shipping = {}, req) => {
+  const order = await prisma.$transaction(async (transaction) => {
     const cart = await transaction.carts.findUnique({
       where: { user_id: userId },
       include: { items: { include: { product: true } } },
@@ -55,6 +56,19 @@ export const createOrderFromCart = async (userId, shipping = {}) => {
     await clearCart(userId, transaction);
     return order;
   });
+
+  await logAudit({
+    ...auditContext(req),
+    action: "order.create",
+    targetType: "order",
+    targetId: order.id,
+    detail: {
+      totalAmount: Number(order.total_amount),
+      itemCount: order.items.length,
+    },
+  });
+
+  return order;
 };
 
 export const listOrders = async (userId) => {

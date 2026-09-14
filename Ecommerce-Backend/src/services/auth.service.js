@@ -4,6 +4,7 @@ import { prismaWrite } from "../config/prisma.js";
 import { normalizeRole, ROLES } from "../middlewares/auth.middleware.js";
 import { UserEntity } from "../entities/index.js";
 import { loginFailedTotal } from "../config/metrics.js";
+import { auditContext, logAudit } from "./audit.service.js";
 
 const sanitizeUser = (user) => {
   const entity = new UserEntity({ ...user, role: normalizeRole(user.role) });
@@ -27,10 +28,11 @@ const signToken = (user) => {
   );
 };
 
-export const registerUser = async ({ name, email, password }) => {
+export const registerUser = async ({ name, email, password }, req) => {
   if (!email || !password) {
     throw Object.assign(new Error("Email and password are required"), {
       statusCode: 400,
+      auditReason: "invalid_input",
     });
   }
 
@@ -41,6 +43,7 @@ export const registerUser = async ({ name, email, password }) => {
   if (existingUser.length > 0) {
     throw Object.assign(new Error("Email already exists"), {
       statusCode: 409,
+      auditReason: "email_exists",
     });
   }
 
@@ -59,16 +62,27 @@ export const registerUser = async ({ name, email, password }) => {
 
   const user = userRows[0];
 
+  await logAudit({
+    ...auditContext(req),
+    actorId: user.id,
+    actorRole: normalizeRole(user.role),
+    action: "user.register",
+    targetType: "user",
+    targetId: user.id,
+    detail: { role: normalizeRole(user.role) },
+  });
+
   return {
     user: sanitizeUser(user),
     token: signToken(user),
   };
 };
 
-export const loginUser = async ({ email, password }) => {
+export const loginUser = async ({ email, password }, req) => {
   if (!email || !password) {
     throw Object.assign(new Error("Email and password are required"), {
       statusCode: 400,
+      auditReason: "invalid_input",
     });
   }
 
@@ -84,14 +98,29 @@ export const loginUser = async ({ email, password }) => {
 
   if (!user) {
     loginFailedTotal.inc({ reason: "user_not_found" });
-    throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid credentials"), {
+      statusCode: 401,
+      auditReason: "user_not_found",
+    });
   }
 
   const passwordMatch = await bcrypt.compare(password, user.password);
   if (!passwordMatch) {
     loginFailedTotal.inc({ reason: "wrong_password" });
-    throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid credentials"), {
+      statusCode: 401,
+      auditReason: "wrong_password",
+    });
   }
+
+  await logAudit({
+    ...auditContext(req),
+    actorId: user.id,
+    actorRole: normalizeRole(user.role),
+    action: "user.login_success",
+    targetType: "user",
+    targetId: user.id,
+  });
 
   return {
     user: sanitizeUser(user),
@@ -99,7 +128,16 @@ export const loginUser = async ({ email, password }) => {
   };
 };
 
-export const logoutUser = async () => ({ message: "Logged out" });
+export const logoutUser = async (req) => {
+  await logAudit({
+    ...auditContext(req),
+    action: "user.logout",
+    targetType: "user",
+    targetId: req?.user?.id,
+  });
+
+  return { message: "Logged out" };
+};
 
 export const getCurrentUser = async (user) => ({ user });
 
@@ -114,12 +152,23 @@ export const listUsers = async () => {
   return users.map(sanitizeUser);
 };
 
-export const updateUserRole = async (userId, role) => {
+export const updateUserRole = async (userId, role, req) => {
   const requestedRole = String(role || "").toUpperCase();
   if (![ROLES.CUSTOMER, ROLES.SHOP_OWNER, ROLES.ADMIN].includes(requestedRole)) {
-    throw Object.assign(new Error("Invalid role"), { statusCode: 400 });
+    throw Object.assign(new Error("Invalid role"), {
+      statusCode: 400,
+      auditReason: "invalid_role",
+    });
   }
   const nextRole = requestedRole;
+  const currentRows = await prismaWrite.$queryRaw`
+    SELECT COALESCE(r.code, u.role) AS role
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = ${userId}
+    LIMIT 1
+  `;
+  const oldRole = currentRows[0]?.role || null;
 
   const rows = await prismaWrite.$queryRaw`
     UPDATE users
@@ -131,8 +180,19 @@ export const updateUserRole = async (userId, role) => {
   `;
 
   if (!rows[0]) {
-    throw Object.assign(new Error("User not found"), { statusCode: 404 });
+    throw Object.assign(new Error("User not found"), {
+      statusCode: 404,
+      auditReason: "user_not_found",
+    });
   }
+
+  await logAudit({
+    ...auditContext(req),
+    action: "user.role_change",
+    targetType: "user",
+    targetId: userId,
+    detail: { oldRole, newRole: nextRole },
+  });
 
   return sanitizeUser(rows[0]);
 };

@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { ProductEntity } from "../entities/index.js";
+import { auditContext, logAudit } from "./audit.service.js";
 
 const parseProductPayload = (payloadSource) => {
   const productFile = payloadSource?.files?.product?.[0];
@@ -121,6 +122,14 @@ export const createProduct = async (payloadSource) => {
     },
   });
 
+  await logAudit({
+    ...auditContext(payloadSource),
+    action: "product.create",
+    targetType: "product",
+    targetId: createdProduct.id,
+    detail: { name: createdProduct.name },
+  });
+
   return toProductResponse(createdProduct);
 };
 
@@ -160,14 +169,83 @@ export const updateProduct = async (id, payloadSource) => {
     },
   });
 
+  const oldPrice = Number(existingProduct.price);
+  const newPrice = Number(updatedProduct.price);
+  const oldStock = existingProduct.stock_quantity;
+  const newStock = updatedProduct.stock_quantity;
+  const oldAvailability = existingProduct.product_available;
+  const newAvailability = updatedProduct.product_available;
+
+  if (oldPrice !== newPrice) {
+    await logAudit({
+      ...auditContext(payloadSource),
+      action: "product.price_change",
+      targetType: "product",
+      targetId: id,
+      detail: { oldPrice, newPrice },
+    });
+  }
+
+  if (oldStock !== newStock) {
+    await logAudit({
+      ...auditContext(payloadSource),
+      action: "product.inventory_change",
+      targetType: "product",
+      targetId: id,
+      detail: { oldStock, newStock },
+    });
+  }
+
+  if (oldAvailability !== newAvailability) {
+    await logAudit({
+      ...auditContext(payloadSource),
+      action: "product.availability_change",
+      targetType: "product",
+      targetId: id,
+      detail: { oldAvailability, newAvailability },
+    });
+  }
+
+  if (imageFile) {
+    await logAudit({
+      ...auditContext(payloadSource),
+      action: "product.image_change",
+      targetType: "product",
+      targetId: id,
+      detail: { imageName: imageFile.originalname, imageType: imageFile.mimetype },
+    });
+  }
+
+  const changedFields = ["name", "brand", "description", "category"]
+    .filter((field) => existingProduct[field] !== updatedProduct[field]);
+  if (existingProduct.release_date?.getTime() !== updatedProduct.release_date?.getTime()) {
+    changedFields.push("release_date");
+  }
+  if (changedFields.length > 0) {
+    await logAudit({
+      ...auditContext(payloadSource),
+      action: "product.update",
+      targetType: "product",
+      targetId: id,
+      detail: { changedFields },
+    });
+  }
+
   return toProductResponse(updatedProduct);
 };
 
-export const deleteProduct = async (id) => {
+export const deleteProduct = async (id, req) => {
   await prisma.products.delete({ where: { id } });
+
+  await logAudit({
+    ...auditContext(req),
+    action: "product.delete",
+    targetType: "product",
+    targetId: id,
+  });
 };
 
-export const purchaseProduct = async (id, quantity) => {
+export const purchaseProduct = async (id, quantity, req) => {
   const requestedQuantity = Number(quantity);
   if (!Number.isInteger(requestedQuantity) || requestedQuantity < 1) {
     throw Object.assign(new Error("Quantity must be a positive integer"), {
@@ -193,5 +271,14 @@ export const purchaseProduct = async (id, quantity) => {
   }
 
   const product = await prisma.products.findUnique({ where: { id } });
+
+  await logAudit({
+    ...auditContext(req),
+    action: "product.direct_purchase",
+    targetType: "product",
+    targetId: id,
+    detail: { quantity: requestedQuantity },
+  });
+
   return toProductResponse(product);
 };
